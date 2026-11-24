@@ -10,7 +10,7 @@
 # RPMs are signed and the public key is published as KEY.gpg and KEY.asc.
 #
 # Usage: repo-build.sh SITE_DIR PACKAGES_DIR...
-# Needs dpkg-dev, apt-utils and createrepo-c; rpm and gnupg to sign.
+# Needs dpkg-dev, apt-utils, rpm and createrepo-c; gnupg to sign.
 set -eu
 site=$1
 shift
@@ -19,12 +19,17 @@ rm -rf "$site"
 mkdir -p "$site/deb/pool/snapshot" "$site/deb/pool/stable" "$site/rpm/snapshot" "$site/rpm/stable"
 for dir in "$@"; do
 	find "$dir" -type f \( -name '*.deb' -o -name '*.rpm' \) | while read -r f; do
-		name=$(basename "$f")
-		case $name in
-		*_0~git* | *-0~git*) suite=snapshot ;;
+		# The suite comes from the version inside the package: a release
+		# asset's name cannot hold the ~ of a snapshot version.
+		case $f in
+		*.deb) version=$(dpkg-deb -f "$f" Version) ;;
+		*.rpm) version=$(rpm -qp --qf '%{VERSION}' "$f" 2>/dev/null) ;;
+		esac
+		case $version in
+		0~git*) suite=snapshot ;;
 		*) suite=stable ;;
 		esac
-		case $name in
+		case $f in
 		*.deb) cp "$f" "$site/deb/pool/$suite/" ;;
 		*.rpm) cp "$f" "$site/rpm/$suite/" ;;
 		esac
