@@ -180,7 +180,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy-again.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -236,6 +236,19 @@ jobs:
         with:
           path: site
 
+      # The Pages API sometimes cannot see the artifact the step before just
+      # uploaded ("No artifacts named github-pages"), and the same deploy a
+      # minute or two later finds it.
       - name: Deploy
         id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
+
+      - name: Wait for the Pages API
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 120
+
+      - name: Deploy, second attempt
+        id: deploy-again
+        if: steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
