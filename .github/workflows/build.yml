@@ -74,7 +74,7 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           # A nightly run has nothing to do when that version is published already.
-          if gh release view "snapshot-$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view "$(scripts/release-tag.sh "$version")" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "$version is published already"
           else

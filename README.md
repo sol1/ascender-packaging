@@ -8,7 +8,8 @@ apt and a yum repository on GitHub Pages:
 
 The page there has the two lines that add the repository. Every build is
 also a [release](https://github.com/sol1/ascender-packaging/releases) of
-this repository with the packages attached.
+this repository with the packages attached (`snapshot-0.git...`, a
+prerelease, or `v<version>`).
 
 Ascender's own deployment story is container images and the Kubernetes
 operator. This repository is the other one: plain hosts, a package manager,

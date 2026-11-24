@@ -1,7 +1,6 @@
 #!/bin/sh
 # Publishes the packages in a directory as a GitHub release of this
-# repository: snapshot-<version> (a prerelease) for a snapshot build,
-# v<version> for a build of a release tag. Then removes snapshot releases
+# repository (scripts/release-tag.sh names it: a prerelease for a snapshot). Then removes snapshot releases
 # older than the KEEP_SNAPSHOTS newest (default 5); releases of tags stay.
 #
 # Usage: publish-release.sh VERSION PACKAGES_DIR SOURCE_REPO SOURCE_SHA
@@ -12,14 +11,13 @@ source_repo=$3
 source_sha=$4
 keep=${KEEP_SNAPSHOTS:-5}
 
+tag=$("$(dirname "$0")/release-tag.sh" "$version")
 case $version in
 0~git*)
-	tag="snapshot-$version"
 	flags="--prerelease"
 	title="Snapshot $version"
 	;;
 *)
-	tag="v$version"
 	flags=""
 	title="Ascender $version"
 	;;
