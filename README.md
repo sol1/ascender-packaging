@@ -138,9 +138,10 @@ Logs go to the journal: `journalctl -u ascender-web -u ascender-task`.
 ## Building
 
 The source is cloned from the repository and ref in `source.env`
-(`sol1/ascender` at `golang-netbox` while the NetBox pull request is open;
-`ctrliq/ascender` at `golang` after). Go, as recent as the source's
-`go.mod` wants, and [nfpm](https://nfpm.goreleaser.com) are needed.
+(`ctrliq/ascender` at `golang`). Go and [nfpm](https://nfpm.goreleaser.com)
+are needed; the Go release that builds the binaries is `GOTOOLCHAIN` in the
+`Makefile`, downloaded by the go command, and is bumped when a patch release
+fixes something in the standard library before the source's `go.mod` moves.
 
     make packages                          # clone, build amd64, deb and rpm into build/packages
     make packages SOURCE_DIR=../ascender ARCH=arm64 FORMATS=deb

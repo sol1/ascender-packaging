@@ -12,8 +12,13 @@ FORMATS    ?= deb rpm
 BUILD      ?= build
 NFPM       ?= nfpm
 VERSION    ?= $(shell test -e $(SOURCE_DIR)/.git && scripts/version.sh $(SOURCE_DIR))
+# The Go that builds the binaries. The source's go.mod pins a toolchain,
+# and when a newer patch release fixes a standard library vulnerability
+# (govulncheck reports it) the packages should carry the fix before the
+# source moves: the go command downloads the release named here.
+GOTOOLCHAIN ?= go1.27.4
 
-export BUILD NFPM
+export BUILD NFPM GOTOOLCHAIN
 
 .PHONY: help source binaries packages test repo clean
 
