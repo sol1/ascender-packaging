@@ -170,6 +170,26 @@ and `KEY.asc`; the site's instructions change to match. Without it the
 repositories are unsigned and the instructions say `trusted=yes` and
 `gpgcheck=0`.
 
+## Adopting this repository
+
+Nothing here is tied to sol1 beyond defaults. The workflow serves the
+site of whichever repository it runs in and names that repository as
+the packages' homepage, so a fork, or a transfer to another organisation,
+needs only:
+
+1. GitHub Pages enabled for the repository with the source set to
+   GitHub Actions (`gh api -X POST repos/OWNER/REPO/pages -f build_type=workflow`).
+2. The signing key as the secret `PACKAGING_GPG_PRIVATE_KEY`, when the
+   packages are to be signed; without it they are published unsigned.
+3. Optionally the repository variables `PACKAGE_MAINTAINER` (`Name <address>`)
+   and `PACKAGE_VENDOR`, which go into the package metadata and the apt
+   `Origin`; unset, the defaults in `scripts/build-packages.sh` apply.
+4. `source.env` pointed at the source to build.
+
+Changes are welcome as pull requests, signed off as in Ascender's own
+repository (`git commit -s`, the Developer Certificate of Origin).
+`make test` runs what the workflow runs.
+
 ## Layout
 
     source.env            which Ascender to build

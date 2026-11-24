@@ -111,7 +111,14 @@ jobs:
       - name: Install nfpm
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.44.0
 
+      # Who built the packages: the repository variables PACKAGE_MAINTAINER
+      # and PACKAGE_VENDOR when set, else the defaults in
+      # scripts/build-packages.sh; the homepage is this repository.
       - name: Build the packages
+        env:
+          MAINTAINER: ${{ vars.PACKAGE_MAINTAINER }}
+          VENDOR: ${{ vars.PACKAGE_VENDOR }}
+          HOMEPAGE: ${{ github.server_url }}/${{ github.repository }}
         run: make packages SOURCE_DIR=src-ascender ARCH=${{ matrix.arch }} VERSION=${{ needs.source.outputs.version }}
 
       - name: Upload
@@ -212,9 +219,13 @@ jobs:
           done
           find site-packages -type f | sort
 
+      # The site serves itself: a fork's Pages address and repository.
       - name: Lay out the repositories
         env:
           GPG_PRIVATE_KEY: ${{ secrets.PACKAGING_GPG_PRIVATE_KEY }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          ORIGIN: ${{ vars.PACKAGE_VENDOR || github.repository_owner }}
         run: scripts/repo-build.sh site site-packages
 
       - name: Configure Pages

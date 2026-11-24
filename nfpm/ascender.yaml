@@ -1,5 +1,5 @@
 # nfpm package definition (https://nfpm.goreleaser.com). scripts/build-packages.sh
-# sets VERSION, ARCH, BIN, SHARE and UNITS in the environment before running nfpm.
+# renders VERSION, ARCH, BIN, SHARE, UNITS, MAINTAINER, VENDOR and HOMEPAGE into it before running nfpm.
 name: ascender
 arch: all
 platform: linux
@@ -8,9 +8,9 @@ version_schema: none
 release: "1"
 section: admin
 priority: optional
-maintainer: Dave Kempe <davekempe@users.noreply.github.com>
-vendor: sol1
-homepage: https://github.com/sol1/ascender-packaging
+maintainer: ${MAINTAINER}
+vendor: ${VENDOR}
+homepage: ${HOMEPAGE}
 license: Apache-2.0
 description: |
   Ascender automation platform (complete single node)
