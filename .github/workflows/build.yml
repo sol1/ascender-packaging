@@ -1,0 +1,230 @@
+# Builds the Ascender packages from the source source.env names (or the one
+# a manual run gives), tests them in Debian 13 and Rocky Linux 9 containers,
+# and, except for pull requests, publishes them as a release of this
+# repository and rebuilds the apt and yum repositories on GitHub Pages.
+name: Packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly, 01:00 Sydney in winter: a new snapshot when the source moved.
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: Ascender repository to build (owner/name; default from source.env)
+        required: false
+      source_ref:
+        description: Branch, tag or commit to build (default from source.env)
+        required: false
+      publish:
+        description: Publish a release and the package repositories
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages-${{ github.ref }}-${{ inputs.source_ref || 'default' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source:
+    name: Resolve the source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      repo: ${{ steps.pick.outputs.repo }}
+      ref: ${{ steps.pick.outputs.ref }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      version: ${{ steps.resolve.outputs.version }}
+      changed: ${{ steps.resolve.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Pick the source
+        id: pick
+        env:
+          IN_REPO: ${{ inputs.source_repo }}
+          IN_REF: ${{ inputs.source_ref }}
+        run: |
+          . ./source.env
+          echo "repo=${IN_REPO:-$SOURCE_REPO}" >> "$GITHUB_OUTPUT"
+          echo "ref=${IN_REF:-$SOURCE_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ steps.pick.outputs.repo }}
+          ref: ${{ steps.pick.outputs.ref }}
+          path: src-ascender
+          fetch-depth: 0
+
+      - name: Version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(git -C src-ascender rev-parse HEAD)
+          version=$(scripts/version.sh src-ascender)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A nightly run has nothing to do when that version is published already.
+          if gh release view "snapshot-$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "$version is published already"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "building $version from ${{ steps.pick.outputs.repo }}@$sha"
+
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: source
+    if: needs.source.outputs.changed == 'true' || github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Checkout the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ needs.source.outputs.repo }}
+          ref: ${{ needs.source.outputs.sha }}
+          path: src-ascender
+
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
+        with:
+          go-version-file: src-ascender/src/go.mod
+          cache-dependency-path: src-ascender/src/go.sum
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.44.0
+
+      - name: Build the packages
+        run: make packages SOURCE_DIR=src-ascender ARCH=${{ matrix.arch }} VERSION=${{ needs.source.outputs.version }}
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: packages-${{ matrix.arch }}
+          path: build/packages/
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    name: Test ${{ matrix.image }}
+    needs: [source, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['debian:13', 'rockylinux:9']
+    container:
+      image: ${{ matrix.image }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ascender
+          POSTGRES_PASSWORD: ascender
+          POSTGRES_DB: ascender
+        options: >-
+          --health-cmd "pg_isready -U ascender"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Download the packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: packages-amd64
+          path: /packages
+
+      - name: Smoke test
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          PGHOST: postgres
+        run: sh tests/smoke.sh
+
+  publish:
+    name: Publish
+    needs: [source, build, test]
+    if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Download the packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: packages-*
+          path: packages
+          merge-multiple: true
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: scripts/publish-release.sh "${{ needs.source.outputs.version }}" packages "${{ needs.source.outputs.repo }}" "${{ needs.source.outputs.sha }}"
+
+      - name: Repository tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends dpkg-dev apt-utils createrepo-c rpm gnupg >/dev/null
+
+      # The site carries the newest snapshot and every release: GitHub Pages
+      # sites are kept under a gigabyte, and a snapshot is a few hundred
+      # megabytes across formats and architectures. Older snapshots stay on
+      # the releases page.
+      - name: Gather the packages the site serves
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p site-packages
+          newest=$(gh release list --limit 200 --json tagName,createdAt --jq '[.[] | select(.tagName | startswith("snapshot-"))] | sort_by(.createdAt) | reverse | .[0].tagName')
+          for tag in $newest $(gh release list --limit 200 --json tagName --jq '.[] | select(.tagName | startswith("v")) | .tagName'); do
+            gh release download "$tag" -D "site-packages/$tag" -p '*.deb' -p '*.rpm'
+          done
+          find site-packages -type f | sort
+
+      - name: Lay out the repositories
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.PACKAGING_GPG_PRIVATE_KEY }}
+        run: scripts/repo-build.sh site site-packages
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: site
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1

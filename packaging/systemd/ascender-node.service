@@ -1,0 +1,29 @@
+[Unit]
+Description=Ascender mesh node (receptor)
+Documentation=https://github.com/ctrliq/ascender
+After=network-online.target
+Wants=network-online.target
+# Written by ascender-node-apply-bundle (execution and hop nodes) or the
+# installer (a control node's receptor); until then the unit does nothing.
+ConditionPathExists=/etc/ascender/receptor/receptor.conf
+
+[Service]
+Type=simple
+User=ascender
+Group=ascender
+WorkingDirectory=/var/lib/ascender
+Environment=HOME=/var/lib/ascender
+Environment=XDG_RUNTIME_DIR=/run/ascender
+Environment=CONTAINERS_CONF=/etc/ascender/containers.conf
+RuntimeDirectory=ascender receptor
+RuntimeDirectoryMode=0750
+Delegate=yes
+ExecStart=/usr/bin/receptor -c /etc/ascender/receptor/receptor.conf
+# Work units (ansible-runner) outlive a restart of receptor itself.
+KillMode=process
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

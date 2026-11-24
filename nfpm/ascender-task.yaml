@@ -1,0 +1,60 @@
+# nfpm package definition (https://nfpm.goreleaser.com). scripts/build-packages.sh
+# sets VERSION, ARCH, BIN, SHARE and UNITS in the environment before running nfpm.
+name: ascender-task
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: none
+release: "1"
+section: admin
+priority: optional
+maintainer: Dave Kempe <davekempe@users.noreply.github.com>
+vendor: sol1
+homepage: https://github.com/sol1/ascender-packaging
+license: Apache-2.0
+description: |
+  Ascender automation platform (task process)
+  The dispatcher that runs jobs, project syncs, schedules and cleanups, as a
+  systemd service. It registers this host as a control plane node (hybrid by
+  default, so jobs run here in execution environment images through
+  rootless podman; ASCENDER_NODE_TYPE=control to control only). Install
+  receptor on a control node that has execution nodes.
+contents:
+  - src: ${BIN}/ascender-task
+    dst: /usr/bin/ascender-task
+    file_info:
+      mode: 0755
+  - src: ${UNITS}/ascender-task.service
+    dst: /usr/lib/systemd/system/ascender-task.service
+    file_info:
+      mode: 0644
+scripts:
+  postinstall: packaging/scripts/task-postinst.sh
+  preremove: packaging/scripts/task-prerm.sh
+overrides:
+  deb:
+    depends:
+      - ascender-common (= ${VERSION}-1)
+      - ca-certificates
+      - podman
+      - crun
+      - fuse-overlayfs
+      - slirp4netns
+      - uidmap
+    recommends:
+      - receptor
+  rpm:
+    depends:
+      - ascender-common = ${VERSION}-1
+      - ca-certificates
+      - podman
+      - crun
+      - fuse-overlayfs
+      - slirp4netns
+      - shadow-utils-subid
+    recommends:
+      - receptor
+deb:
+  compression: xz
+rpm:
+  compression: xz

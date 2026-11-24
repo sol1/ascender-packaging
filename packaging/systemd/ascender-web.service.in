@@ -1,0 +1,29 @@
+[Unit]
+Description=Ascender web server (API and UI)
+Documentation=https://github.com/ctrliq/ascender
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ascender
+Group=ascender
+WorkingDirectory=/var/lib/ascender
+Environment=ASCENDER_VERSION=@VERSION@
+Environment=ASCENDER_DOCS_DIR=/usr/share/ascender/docs
+Environment=ASCENDER_SECRET_KEY_FILE=/etc/ascender/SECRET_KEY
+Environment=ASCENDER_RECEPTOR_DIR=/etc/ascender/receptor
+Environment=ASCENDER_RECEPTOR_CONFIG=/etc/ascender/receptor/receptor.conf
+EnvironmentFile=/etc/ascender/ascender.env
+ExecStart=/usr/bin/ascender-web
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/ascender /var/log/ascender
+
+[Install]
+WantedBy=multi-user.target

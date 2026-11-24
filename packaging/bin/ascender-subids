@@ -1,0 +1,12 @@
+#!/bin/sh
+# Gives the ascender user a range of subordinate uids and gids, which
+# rootless podman needs, when it has none: the 65536 ids above every range
+# already in /etc/subuid and /etc/subgid, from 100000 up.
+set -eu
+user=ascender
+for f in subuid subgid; do
+	[ -f "/etc/$f" ] || touch "/etc/$f"
+	grep -q "^$user:" "/etc/$f" && continue
+	start=$(awk -F: -v s=100000 '$2 ~ /^[0-9]+$/ { e = $2 + $3; if (e > s) s = e } END { print s }' "/etc/$f")
+	echo "$user:$start:65536" >>"/etc/$f"
+done

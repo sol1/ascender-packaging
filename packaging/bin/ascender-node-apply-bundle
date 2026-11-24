@@ -1,0 +1,153 @@
+#!/usr/bin/python3 -I
+"""Installs an Ascender install bundle on this node and starts receptor.
+
+The bundle is the tarball Ascender gives for an execution or hop node
+(Instances, the node's page, "Install Bundle", or GET
+/api/v2/instances/N/install_bundle/): the node's certificate and key signed
+by the mesh CA, the CA, the work signing public key, and group_vars that
+say whether the node listens, on which port and protocol, and which
+addresses it peers to. Ascender expects ansible.receptor to apply it; this
+script does the same without Ansible, for the ascender-node package's
+layout:
+
+  /etc/ascender/receptor/receptor.conf
+  /etc/ascender/receptor/tls/receptor.crt, receptor.key
+  /etc/ascender/receptor/tls/ca/mesh-CA.crt
+  /etc/ascender/receptor/work_public_key.pem
+
+Usage: ascender-node-apply-bundle [--no-restart] BUNDLE.tar.gz
+"""
+
+import argparse
+import grp
+import os
+import pwd
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+
+ETC = "/etc/ascender/receptor"
+USER = "ascender"
+
+
+def read_group_vars(text):
+    """The handful of keys the bundle's group_vars/all.yml carries, read
+    without a YAML library: one key per line, and the peers as a list of
+    address/protocol pairs."""
+    vars = {}
+    peers = []
+    peer = None
+    for line in text.splitlines():
+        m = re.match(r"^(\w+):\s*(.*?)\s*$", line)
+        if m:
+            vars[m.group(1)] = m.group(2)
+            continue
+        m = re.match(r"^\s+-\s+address:\s*(\S+)", line)
+        if m:
+            peer = {"address": m.group(1), "protocol": "tcp"}
+            peers.append(peer)
+            continue
+        m = re.match(r"^\s+protocol:\s*(\S+)", line)
+        if m and peer is not None:
+            peer["protocol"] = m.group(1)
+    vars["peers"] = peers
+    vars["execution"] = "receptor_work_commands" in text
+    return vars
+
+
+def receptor_config(node_id, vars):
+    tls = f"{ETC}/tls"
+    lines = [
+        "# Written by ascender-node-apply-bundle from the install bundle; the",
+        "# ascender-node service runs receptor with it.",
+        "---",
+        f"- node:\n    id: {node_id}\n    datadir: /var/lib/ascender/receptor",
+        "- log-level: info",
+        "- control-service:\n    service: control\n    filename: /run/receptor/receptor.sock\n    permissions: 0660",
+        f"- tls-server:\n    name: mesh\n    cert: {tls}/receptor.crt\n    key: {tls}/receptor.key\n    requireclientcert: true\n    clientcas: {tls}/ca/mesh-CA.crt\n    mintls13: false",
+        f"- tls-client:\n    name: mesh\n    cert: {tls}/receptor.crt\n    key: {tls}/receptor.key\n    rootcas: {tls}/ca/mesh-CA.crt\n    insecureskipverify: false\n    mintls13: false",
+    ]
+    if vars.get("receptor_listener") == "true":
+        port = vars.get("receptor_port", "27199")
+        protocol = vars.get("receptor_protocol", "tcp")
+        kind = "ws-listener" if protocol in ("ws", "wss") else "tcp-listener"
+        lines.append(f"- {kind}:\n    port: {port}\n    tls: mesh")
+    for peer in vars["peers"]:
+        kind = "ws-peer" if peer["protocol"] in ("ws", "wss") else "tcp-peer"
+        lines.append(f"- {kind}:\n    address: {peer['address']}\n    tls: mesh\n    redial: true")
+    lines.append(f"- work-verification:\n    publickey: {ETC}/work_public_key.pem")
+    if vars["execution"]:
+        lines.append("- work-command:\n    worktype: ansible-runner\n    command: ansible-runner\n    params: worker\n    allowruntimeparams: true\n    verifysignature: true")
+    return "\n".join(lines) + "\n"
+
+
+def install(src, dst, mode):
+    os.makedirs(os.path.dirname(dst), mode=0o750, exist_ok=True)
+    shutil.copyfile(src, dst)
+    os.chown(dst, 0, grp.getgrnam(USER).gr_gid)
+    os.chmod(dst, mode)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("bundle", help="the install bundle (tar.gz)")
+    p.add_argument("--no-restart", action="store_true", help="write the files, leave the service alone")
+    args = p.parse_args()
+    if os.geteuid() != 0:
+        sys.exit("run as root")
+    try:
+        pwd.getpwnam(USER)
+    except KeyError:
+        sys.exit(f"no user {USER}: is ascender-common installed?")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with tarfile.open(args.bundle) as tar:
+            for m in tar.getmembers():
+                if m.name.startswith("/") or ".." in m.name.split("/") or not (m.isreg() or m.isdir()):
+                    sys.exit(f"refusing {m.name} in the bundle")
+            tar.extractall(tmp)
+        tops = [d for d in os.listdir(tmp) if d.endswith("_install_bundle")]
+        if len(tops) != 1:
+            sys.exit("not an install bundle: expected one <hostname>_install_bundle directory")
+        node_id = tops[0][: -len("_install_bundle")]
+        base = os.path.join(tmp, tops[0])
+        with open(os.path.join(base, "group_vars", "all.yml")) as f:
+            vars = read_group_vars(f.read())
+
+        install(os.path.join(base, "receptor/tls/ca/mesh-CA.crt"), f"{ETC}/tls/ca/mesh-CA.crt", 0o640)
+        install(os.path.join(base, "receptor/tls/receptor.crt"), f"{ETC}/tls/receptor.crt", 0o640)
+        install(os.path.join(base, "receptor/tls/receptor.key"), f"{ETC}/tls/receptor.key", 0o640)
+        install(os.path.join(base, "receptor/work_public_key.pem"), f"{ETC}/work_public_key.pem", 0o640)
+        for d in (ETC, f"{ETC}/tls", f"{ETC}/tls/ca"):
+            os.chown(d, 0, grp.getgrnam(USER).gr_gid)
+            os.chmod(d, 0o750)
+
+    datadir = "/var/lib/ascender/receptor"
+    os.makedirs(datadir, mode=0o750, exist_ok=True)
+    pw = pwd.getpwnam(USER)
+    os.chown(datadir, pw.pw_uid, pw.pw_gid)
+
+    conf = f"{ETC}/receptor.conf"
+    with open(conf, "w") as f:
+        f.write(receptor_config(node_id, vars))
+    os.chown(conf, 0, grp.getgrnam(USER).gr_gid)
+    os.chmod(conf, 0o640)
+
+    kind = "execution" if vars["execution"] else "hop"
+    listener = f"listening on {vars.get('receptor_port')}/{vars.get('receptor_protocol', 'tcp')}" if vars.get("receptor_listener") == "true" else "no listener"
+    peers = ", ".join(p["address"] for p in vars["peers"]) or "none"
+    print(f"{kind} node {node_id}: {listener}, peers: {peers}; wrote {conf}")
+
+    if args.no_restart or not os.path.isdir("/run/systemd/system"):
+        return
+    subprocess.run(["systemctl", "daemon-reload"], check=True)
+    subprocess.run(["systemctl", "enable", "--quiet", "ascender-node"], check=True)
+    subprocess.run(["systemctl", "restart", "ascender-node"], check=True)
+    print("ascender-node started; receptorctl --socket /run/receptor/receptor.sock status shows the mesh")
+
+
+if __name__ == "__main__":
+    main()

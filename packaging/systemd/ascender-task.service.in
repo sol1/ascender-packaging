@@ -1,0 +1,35 @@
+[Unit]
+Description=Ascender task process (dispatcher)
+Documentation=https://github.com/ctrliq/ascender
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ascender
+Group=ascender
+WorkingDirectory=/var/lib/ascender
+Environment=ASCENDER_VERSION=@VERSION@
+Environment=ASCENDER_SECRET_KEY_FILE=/etc/ascender/SECRET_KEY
+Environment=ASCENDER_CONTAINER_RUNTIME=podman
+Environment=ASCENDER_RECEPTOR_DIR=/etc/ascender/receptor
+Environment=ASCENDER_RECEPTOR_CONFIG=/etc/ascender/receptor/receptor.conf
+Environment=HOME=/var/lib/ascender
+Environment=XDG_RUNTIME_DIR=/run/ascender
+Environment=CONTAINERS_CONF=/etc/ascender/containers.conf
+EnvironmentFile=/etc/ascender/ascender.env
+# Rootless podman: no NoNewPrivileges (newuidmap is setuid), its own cgroup subtree.
+RuntimeDirectory=ascender
+RuntimeDirectoryMode=0700
+Delegate=yes
+ExecStart=/usr/bin/ascender-task
+# On stop the process detaches from, re-queues or stops its jobs within
+# ASCENDER_SHUTDOWN_TIMEOUT (30 seconds).
+TimeoutStopSec=45
+KillMode=mixed
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

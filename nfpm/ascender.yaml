@@ -1,0 +1,41 @@
+# nfpm package definition (https://nfpm.goreleaser.com). scripts/build-packages.sh
+# sets VERSION, ARCH, BIN, SHARE and UNITS in the environment before running nfpm.
+name: ascender
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: none
+release: "1"
+section: admin
+priority: optional
+maintainer: Dave Kempe <davekempe@users.noreply.github.com>
+vendor: sol1
+homepage: https://github.com/sol1/ascender-packaging
+license: Apache-2.0
+description: |
+  Ascender automation platform (complete single node)
+  Installs the web server, the task process and PostgreSQL on this host and
+  sets them up: the database (reached over its socket, no password), the
+  SECRET_KEY, a self-signed certificate for https on port 8070, and the
+  admin password, written to /etc/ascender/ADMIN_PASSWORD. Both services are
+  enabled and started. Add execution nodes with the ascender-node package.
+contents:
+  - src: packaging/bin/ascender-setup-single-node
+    dst: /usr/libexec/ascender/setup-single-node
+    file_info:
+      mode: 0755
+scripts:
+  postinstall: packaging/scripts/single-postinst.sh
+overrides:
+  deb:
+    depends:
+      - ascender-web (= ${VERSION}-1)
+      - ascender-task (= ${VERSION}-1)
+      - postgresql
+      - openssl
+  rpm:
+    depends:
+      - ascender-web = ${VERSION}-1
+      - ascender-task = ${VERSION}-1
+      - postgresql-server
+      - openssl

@@ -1,0 +1,71 @@
+#!/bin/sh
+# Sets this host up as a complete Ascender node: the local PostgreSQL, the
+# secrets, a self-signed certificate, and the two services. Run by the
+# ascender package when it is installed; safe to run again (it only fills
+# in what is missing).
+set -eu
+etc=/etc/ascender
+env_file=$etc/ascender.env
+umask 077
+
+random_text() {
+	head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c "$1"
+}
+set_env() { # KEY VALUE: set the line, or add it
+	if grep -q "^$1=" "$env_file"; then
+		sed -i "s|^$1=.*|$1=$2|" "$env_file"
+	else
+		printf '%s=%s\n' "$1" "$2" >>"$env_file"
+	fi
+}
+
+if [ ! -s "$etc/SECRET_KEY" ]; then
+	head -c 33 /dev/urandom | base64 | tr -d '\n' >"$etc/SECRET_KEY"
+	echo "setup-single-node: generated $etc/SECRET_KEY; back it up with the database, nothing encrypted in it can be read without it"
+fi
+if [ ! -s "$etc/ADMIN_PASSWORD" ]; then
+	random_text 20 >"$etc/ADMIN_PASSWORD"
+fi
+chown root:ascender "$etc/SECRET_KEY" "$etc/ADMIN_PASSWORD"
+chmod 0640 "$etc/SECRET_KEY" "$etc/ADMIN_PASSWORD"
+
+host=$(hostname -f 2>/dev/null || hostname)
+if [ ! -s "$etc/tls/server.crt" ]; then
+	mkdir -p "$etc/tls"
+	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+		-subj "/CN=$host" -addext "subjectAltName=DNS:$host" \
+		-keyout "$etc/tls/server.key" -out "$etc/tls/server.crt" 2>/dev/null
+	chown root:ascender "$etc/tls/server.key" "$etc/tls/server.crt"
+	chmod 0640 "$etc/tls/server.key"
+	chmod 0644 "$etc/tls/server.crt"
+	echo "setup-single-node: made a self-signed certificate for $host in $etc/tls/; replace it with a real one"
+fi
+
+grep -q '^ASCENDER_DATABASE_URL=' "$env_file" || set_env ASCENDER_DATABASE_URL 'postgres://ascender@/ascender?host=/var/run/postgresql&sslmode=disable'
+set_env ASCENDER_ADMIN_PASSWORD_FILE "$etc/ADMIN_PASSWORD"
+set_env ASCENDER_TLS_CERT_FILE "$etc/tls/server.crt"
+set_env ASCENDER_TLS_KEY_FILE "$etc/tls/server.key"
+
+if [ ! -d /run/systemd/system ]; then
+	echo "setup-single-node: no systemd running; the secrets and $env_file are written. Create the database (CREATE ROLE ascender LOGIN; CREATE DATABASE ascender OWNER ascender) and start ascender-web and ascender-task."
+	exit 0
+fi
+
+# PostgreSQL: EL needs its data directory made first; Debian's package did it.
+if command -v postgresql-setup >/dev/null 2>&1 && [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
+	postgresql-setup --initdb >/dev/null
+fi
+systemctl enable --quiet --now postgresql
+for _ in $(seq 1 30); do
+	runuser -u postgres -- pg_isready -q && break
+	sleep 1
+done
+runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'ascender'" | grep -q 1 ||
+	runuser -u postgres -- psql -q -c "CREATE ROLE ascender LOGIN"
+runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'ascender'" | grep -q 1 ||
+	runuser -u postgres -- psql -q -c "CREATE DATABASE ascender OWNER ascender"
+
+systemctl daemon-reload
+systemctl enable --quiet --now ascender-web ascender-task
+echo "setup-single-node: Ascender is starting at https://$host:8070/ (a self-signed certificate)."
+echo "setup-single-node: log in as admin with the password in $etc/ADMIN_PASSWORD."

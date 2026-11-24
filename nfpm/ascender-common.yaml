@@ -1,0 +1,71 @@
+# nfpm package definition (https://nfpm.goreleaser.com). scripts/build-packages.sh
+# sets VERSION, ARCH, BIN, SHARE and UNITS in the environment before running nfpm.
+name: ascender-common
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: none
+release: "1"
+section: admin
+priority: optional
+maintainer: Dave Kempe <davekempe@users.noreply.github.com>
+vendor: sol1
+homepage: https://github.com/sol1/ascender-packaging
+license: Apache-2.0
+description: |
+  Ascender automation platform (common files)
+  The ascender system user, the configuration directory /etc/ascender, the
+  state directories and the licences shared by the ascender-web,
+  ascender-task and ascender-node packages.
+contents:
+  - src: packaging/sysusers/ascender.conf
+    dst: /usr/lib/sysusers.d/ascender.conf
+    file_info:
+      mode: 0644
+  - src: packaging/env/ascender.env
+    dst: /etc/ascender/ascender.env
+    type: config|noreplace
+    file_info:
+      mode: 0640
+  - src: packaging/podman/containers.conf
+    dst: /etc/ascender/containers.conf
+    type: config|noreplace
+    file_info:
+      mode: 0644
+  - src: packaging/bin/ascender-subids
+    dst: /usr/libexec/ascender/subids
+    file_info:
+      mode: 0755
+  - dst: /etc/ascender/receptor/tls/ca
+    type: dir
+    file_info:
+      mode: 0750
+  - dst: /var/lib/ascender
+    type: dir
+    file_info:
+      mode: 0750
+  - dst: /var/log/ascender
+    type: dir
+    file_info:
+      mode: 0750
+  - src: ${SHARE}/LICENSE
+    dst: /usr/share/licenses/ascender/LICENSE
+    file_info:
+      mode: 0644
+  - src: ${SHARE}/NOTICE.txt
+    dst: /usr/share/licenses/ascender/NOTICE.txt
+    file_info:
+      mode: 0644
+  - src: ${SHARE}/licenses/
+    dst: /usr/share/licenses/ascender/licenses/
+    type: tree
+scripts:
+  postinstall: packaging/scripts/common-postinst.sh
+overrides:
+  deb:
+    depends:
+      - systemd
+  rpm:
+    depends:
+      - systemd
+      - shadow-utils

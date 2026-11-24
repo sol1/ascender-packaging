@@ -1,0 +1,49 @@
+# nfpm package definition (https://nfpm.goreleaser.com). scripts/build-packages.sh
+# sets VERSION, ARCH, BIN, SHARE and UNITS in the environment before running nfpm.
+name: ascender-web
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: none
+release: "1"
+section: admin
+priority: optional
+maintainer: Dave Kempe <davekempe@users.noreply.github.com>
+vendor: sol1
+homepage: https://github.com/sol1/ascender-packaging
+license: Apache-2.0
+description: |
+  Ascender automation platform (web server)
+  The REST API, the user interface and the websocket, one static binary with
+  the templates and assets embedded, as a systemd service listening on 8070.
+  Any number of copies can run against one PostgreSQL database.
+contents:
+  - src: ${BIN}/ascender-web
+    dst: /usr/bin/ascender-web
+    file_info:
+      mode: 0755
+  - src: ${UNITS}/ascender-web.service
+    dst: /usr/lib/systemd/system/ascender-web.service
+    file_info:
+      mode: 0644
+  - src: ${SHARE}/docs/
+    dst: /usr/share/ascender/docs/
+    type: tree
+scripts:
+  postinstall: packaging/scripts/web-postinst.sh
+  preremove: packaging/scripts/web-prerm.sh
+overrides:
+  deb:
+    depends:
+      - ascender-common (= ${VERSION}-1)
+      - ca-certificates
+      - tzdata
+  rpm:
+    depends:
+      - ascender-common = ${VERSION}-1
+      - ca-certificates
+      - tzdata
+deb:
+  compression: xz
+rpm:
+  compression: xz
